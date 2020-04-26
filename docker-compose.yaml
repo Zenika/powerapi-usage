@@ -1,0 +1,45 @@
+version: '3.1'
+
+services:
+
+  mongo:
+    image: mongo
+    restart: always
+    volumes:
+      - ./mongo/data:/data/db
+      - ./mongo/config:/data/configdb
+    ports:
+      - "27017:27017"
+      - "27018:27018"
+
+  mongo-express:
+    depends_on: 
+      - mongo   
+    image: mongo-express
+    restart: always
+    ports:
+      - 8081:8081
+      
+  sensor:  
+    depends_on: 
+      - mongo   
+    image:     powerapi/hwpc-sensor
+    privileged: true
+    volumes:
+       - "/sys:/sys"
+       - "/var/lib/docker/containers:/var/lib/docker/containers:ro"
+       - "/tmp/powerapi-sensor-reporting:/reporting"
+       - "./wait-for-it.sh:/wait-for-it.sh"
+    command:  /usr/bin/hwpc-sensor -n sensor_test -r "mongodb" -U $MONGO_URI -D  $DB -C $INPUT_COLLECTION -s "rapl" -o -e RAPL_ENERGY_PKG   -s "msr" -e "TSC" -e "APERF" -e "MPERF" -c "core" -e "CPU_CLK_THREAD_UNHALTED:REF_P" -e "CPU_CLK_THREAD_UNHALTED:THREAD_P" -e "LLC_MISSES" -e "INSTRUCTIONS_RETIRED"
+    entrypoint:  /wait-for-it.sh mongo:27017 --
+    links:
+      - mongo   
+
+
+  formula:
+    depends_on: 
+      - mongo   
+    image:     powerapi/smartwatts-formula 
+    volumes:
+       - "./wait-for-it.sh:/wait-for-it.sh"
+    command:  -s --input mongodb --model HWPCReport -u $MONGO_URI -d $DB -c $INPUT_COLLECTION --output mongodb --name power --model PowerReport  -u $MONGO_URI -d $DB -c $OUTPUT_COLLECTION --output mongodb --name formula --model FormulaReport -u $MONGO_URI -d $DB -c frep  --formula smartwatts --cpu-ratio-base $BASE_CPU_RATIO  --cpu-ratio-min $MIN_CPU_RATIO    --cpu-ratio-max $MAX_CPU_RATIO  --cpu-error-threshold 2.0  --dram-error-threshold 2.0 --disable-dram-formula
